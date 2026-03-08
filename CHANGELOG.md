@@ -6,6 +6,8 @@ All notable changes to this project will be documented in this file.
 
 - refactor(cross-platform): Remove shell-script runtime paths in favor of Python-managed startup/test entrypoints, including Docker entrypoint migration and MCP proxy script cleanup.
 - fix(windows): Add a unified command resolver for `npm`/`iflow` with explicit Windows shim support (`.cmd`/`.bat`), reducing reliance on implicit shell behavior and aligning command execution paths.
+- fix(feishu): Keep streaming enabled but degrade to plain text when interactive card patch/create both fail, while simplifying streaming card content to reduce Feishu-side instability.
+- test(feishu): Add streaming delivery tests covering patch success, recreate success, text fallback, and streaming-end cleanup.
 
 ## v0.3.4 - 2026-03-06
 
