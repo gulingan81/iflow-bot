@@ -21,6 +21,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from datetime import datetime
 from pathlib import Path
@@ -501,32 +502,104 @@ def check_mcp_proxy_running(port: int = 8888) -> bool:
         return False
 
 
-def start_mcp_proxy(port: int = 8888) -> bool:
-    """启动 MCP 代理服务器。"""
-    import subprocess
+def get_mcp_proxy_pid_file() -> Path:
+    """MCP 代理 PID 文件路径（统一到 ~/.iflow-bot）。"""
+    return get_config_dir() / "mcp_proxy.pid"
+
+
+def get_mcp_proxy_log_file() -> Path:
+    """MCP 代理日志文件路径（统一到 ~/.iflow-bot）。"""
+    return get_config_dir() / "mcp_proxy.log"
+
+
+def _resolve_mcp_proxy_config_file() -> Optional[Path]:
+    """解析 MCP 代理配置文件路径。"""
+    env_config = os.environ.get("MCP_PROXY_CONFIG", "").strip()
+    if env_config:
+        env_path = Path(env_config).expanduser()
+        if env_path.exists():
+            return env_path
+
+    runtime_config = get_config_dir() / "config" / ".mcp_proxy_config.json"
+    if runtime_config.exists():
+        return runtime_config
+
+    project_config = Path(__file__).parent.parent.parent / "config" / ".mcp_proxy_config.json"
+    if project_config.exists():
+        return project_config
+
+    return None
+
+
+def stop_mcp_proxy() -> bool:
+    """停止 MCP 代理（如果在运行）。"""
+    pid_file = get_mcp_proxy_pid_file()
+    if not pid_file.exists():
+        return True
+
     try:
-        script_path = Path(__file__).parent.parent.parent / "scripts" / "start_mcp_proxy.sh"
-        if not script_path.exists():
-            console.print(f"[yellow]MCP 代理启动脚本不存在: {script_path}[/yellow]")
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except Exception:
+        pid_file.unlink(missing_ok=True)
+        return False
+
+    try:
+        if is_windows():
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+        else:
+            os.kill(pid, signal.SIGTERM)
+        pid_file.unlink(missing_ok=True)
+        return True
+    except Exception:
+        return False
+
+
+def start_mcp_proxy(port: int = 8888) -> bool:
+    """启动 MCP 代理服务器（跨平台，不依赖 bash 脚本）。"""
+    try:
+        config_file = _resolve_mcp_proxy_config_file()
+        if not config_file:
+            console.print("[yellow]MCP 代理配置文件不存在: ~/.iflow-bot/config/.mcp_proxy_config.json[/yellow]")
             return False
-        
-        process = subprocess.Popen(
-            ["bash", str(script_path)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        
-        # 等待服务启动
-        import asyncio
-        async def wait_for_proxy():
-            for _ in range(10):
-                if check_mcp_proxy_running(port):
+
+        pid_file = get_mcp_proxy_pid_file()
+        log_file = get_mcp_proxy_log_file()
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # 清理失效 PID 文件
+        if pid_file.exists():
+            try:
+                old_pid = int(pid_file.read_text(encoding="utf-8").strip())
+                if process_exists(old_pid):
                     return True
-                await asyncio.sleep(1)
-            return False
-        
-        return asyncio.run(wait_for_proxy())
+            except Exception:
+                pass
+            pid_file.unlink(missing_ok=True)
+
+        with open(log_file, "a", encoding="utf-8") as log_f:
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "iflow_bot.mcp_proxy",
+                    "--config",
+                    str(config_file),
+                    "--port",
+                    str(port),
+                ],
+                stdout=log_f,
+                stderr=log_f,
+                start_new_session=not is_windows(),
+            )
+
+        pid_file.write_text(str(process.pid), encoding="utf-8")
+
+        # 同步等待端口就绪（避免在 async 上下文中使用 asyncio.run）
+        for _ in range(10):
+            if check_mcp_proxy_running(port):
+                return True
+            time.sleep(1)
+        return False
     except Exception as e:
         console.print(f"[yellow]启动 MCP 代理失败: {e}[/yellow]")
         return False

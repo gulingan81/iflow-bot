@@ -376,14 +376,10 @@ class ConsoleService:
 
     async def get_mcp_proxy_status(self) -> dict[str, Any]:
         """获取 MCP 代理状态."""
-        import subprocess
         import aiohttp
 
-        # 检查 PID 文件 - 多路径查找
-        pid_file = self.home_dir.parent / "mcp_proxy.pid"
-        if not pid_file.exists():
-            # 降级到项目目录
-            pid_file = Path(__file__).resolve().parent.parent.parent / "mcp_proxy.pid"
+        # 统一 PID 文件路径
+        pid_file = self.home_dir / "mcp_proxy.pid"
 
         pid: Optional[int] = None
         running = False
@@ -1736,8 +1732,11 @@ def create_app(token: str | None = None) -> FastAPI:
     async def api_mcp_restart(request: Request) -> JSONResponse:
         """重启 MCP 代理。"""
         _check_token(request)
-        import subprocess
-        from iflow_bot.cli.commands import start_mcp_proxy, check_mcp_proxy_running
+        from iflow_bot.cli.commands import (
+            check_mcp_proxy_running,
+            start_mcp_proxy,
+            stop_mcp_proxy,
+        )
 
         cfg = service.get_config_obj()
         port = cfg.driver.mcp_proxy_port if cfg.driver else 8888
@@ -1745,12 +1744,8 @@ def create_app(token: str | None = None) -> FastAPI:
         try:
             # 先检查是否已经在运行
             if check_mcp_proxy_running(port):
-                # 停止现有的（通过 kill 进程）
-                pid_file = service.home_dir.parent / "mcp_proxy.pid"
-                if pid_file.exists():
-                    pid = int(pid_file.read_text(encoding="utf-8").strip())
-                    os.kill(pid, 9)
-                    await asyncio.sleep(1)
+                stop_mcp_proxy()
+                await asyncio.sleep(1)
 
             # 启动新的实例
             if start_mcp_proxy(port):

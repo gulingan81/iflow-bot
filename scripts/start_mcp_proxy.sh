@@ -34,8 +34,11 @@ else
     fi
 fi
 
-LOG_FILE="${MCP_PROXY_LOG:-$PROJECT_ROOT/mcp_proxy.log}"
-PID_FILE="${MCP_PROXY_PID:-$PROJECT_ROOT/mcp_proxy.pid}"
+MCP_HOME="${MCP_PROXY_HOME:-$HOME/.iflow-bot}"
+mkdir -p "$MCP_HOME"
+
+LOG_FILE="${MCP_PROXY_LOG:-$MCP_HOME/mcp_proxy.log}"
+PID_FILE="${MCP_PROXY_PID:-$MCP_HOME/mcp_proxy.pid}"
 
 # 检查是否已经在运行
 if [ -f "$PID_FILE" ]; then
@@ -50,7 +53,7 @@ fi
 
 # 启动代理
 echo "Starting MCP Proxy on port $PORT..."
-python3 "$SCRIPT_DIR/mcp_proxy.py" \
+python3 -m iflow_bot.mcp_proxy \
     --config "$CONFIG_FILE" \
     --port "$PORT" &
 

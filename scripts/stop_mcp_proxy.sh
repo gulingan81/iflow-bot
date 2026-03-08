@@ -1,7 +1,8 @@
 #!/bin/bash
 # 停止 MCP 代理服务器
 
-PID_FILE="$HOME/iflow-bot-src/mcp_proxy.pid"
+MCP_HOME="${MCP_PROXY_HOME:-$HOME/.iflow-bot}"
+PID_FILE="${MCP_PROXY_PID:-$MCP_HOME/mcp_proxy.pid}"
 
 if [ -f "$PID_FILE" ]; then
     PID=$(cat "$PID_FILE")

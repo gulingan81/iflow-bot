@@ -148,20 +148,16 @@ class MCPProxy:
             'servers': list(self.servers.keys())
         })
     
-    async def start_http_server(self, socket_path: str):
+    async def start_http_server(self, port: int):
         """启动 HTTP 服务器"""
-        # 删除已存在的 socket 文件
-        if os.path.exists(socket_path):
-            os.unlink(socket_path)
-        
         runner = web.AppRunner(self.app)
         await runner.setup()
         
         # 使用 TCP 端口（iflow 不支持 Unix Socket）
-        site = web.TCPSite(runner, 'localhost', 8888)
+        site = web.TCPSite(runner, 'localhost', port)
         await site.start()
         
-        print(f"MCP Proxy listening on HTTP port: http://localhost:8888")
+        print(f"MCP Proxy listening on HTTP port: http://localhost:{port}")
         print(f"Available MCP servers: {list(self.servers.keys())}")
         
         return runner
