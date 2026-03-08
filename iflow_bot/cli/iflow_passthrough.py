@@ -2,19 +2,15 @@
 
 这个模块用于透传 iflow CLI 的所有命令，确保 iflow-bot 完全兼容 iflow 的功能。
 """
-import platform
 import subprocess
 import sys
 from typing import Optional, List
 import typer
 from rich.console import Console
 
+from iflow_bot.utils.platform import run_command
+
 console = Console()
-
-
-def _is_windows() -> bool:
-    """检查是否为 Windows 平台。"""
-    return platform.system().lower() == "windows"
 
 
 def create_passthrough_app():
@@ -55,10 +51,10 @@ def create_passthrough_app():
 def _run_iflow(args: List[str]) -> int:
     """执行 iflow 命令并返回退出码"""
     cmd = ["iflow"] + args
-    result = subprocess.run(cmd)
+    result = run_command(cmd)
     return result.returncode
 
 
 def run_iflow_interactive() -> None:
     """运行 iflow 交互模式"""
-    subprocess.run(["iflow"])
+    run_command(["iflow"])

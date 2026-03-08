@@ -32,6 +32,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from iflow_bot.utils.platform import is_windows, prepare_subprocess_command, resolve_command, run_command
+
 console = Console()
 
 
@@ -88,11 +90,6 @@ def _resolve_version() -> str:
 __version__ = _resolve_version()
 
 
-def is_windows() -> bool:
-    """检查是否为 Windows 平台。"""
-    return platform.system().lower() == "windows"
-
-
 def process_exists(pid: int) -> bool:
     """检查进程是否存在（跨平台）。
     
@@ -104,7 +101,7 @@ def process_exists(pid: int) -> bool:
     """
     if is_windows():
         try:
-            result = subprocess.run(
+            result = run_command(
                 ["tasklist", "/FI", f"PID eq {pid}"],
                 capture_output=True,
                 text=True,
@@ -146,35 +143,54 @@ def get_templates_dir() -> Path:
 # iflow 检查
 # ============================================================================
 
-def _ensure_windows_npm_path() -> None:
-    """确保 Windows 下 npm global bin 路径在 PATH 中"""
-    import os
-    import platform
+def _prepend_to_path(path: str) -> None:
+    current_path = os.environ.get("PATH", "")
+    parts = current_path.split(os.pathsep) if current_path else []
+    normalized = {os.path.normcase(os.path.normpath(p)) for p in parts if p}
+    candidate = os.path.normcase(os.path.normpath(path))
+    if candidate not in normalized:
+        os.environ["PATH"] = path + (os.pathsep + current_path if current_path else "")
 
-    if platform.system().lower() != "windows":
+
+
+def _ensure_windows_npm_path() -> None:
+    """确保 Windows 下 npm/global shim 路径在 PATH 中。"""
+    if not is_windows():
         return
 
+    candidates: list[str] = []
+
+    for probe in ("npm", "npm.cmd", "npm.exe"):
+        resolved = resolve_command(probe)
+        if resolved:
+            npm_dir = str(Path(resolved).parent)
+            candidates.append(npm_dir)
+
+    appdata = os.environ.get("APPDATA", "").strip()
+    if appdata:
+        candidates.append(str(Path(appdata) / "npm"))
+
+    local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
+    if local_appdata:
+        candidates.append(str(Path(local_appdata) / "Programs" / "npm"))
+
+    for candidate in candidates:
+        if candidate and os.path.isdir(candidate):
+            _prepend_to_path(candidate)
+
     try:
-        result = subprocess.run(
+        result = run_command(
             ["npm", "root", "-g"],
             capture_output=True,
             text=True,
             timeout=10,
         )
-        npm_global_root = result.stdout.strip()
-        if npm_global_root:
-            # 尝试 bin 目录
+        npm_global_root = (result.stdout or "").strip()
+        if npm_global_root and os.path.isdir(npm_global_root):
+            _prepend_to_path(npm_global_root)
             bin_path = os.path.join(npm_global_root, "bin")
             if os.path.isdir(bin_path):
-                current_path = os.environ.get("PATH", "")
-                if bin_path not in current_path:
-                    os.environ["PATH"] = bin_path + os.pathsep + current_path
-                return
-            # 也尝试直接路径（Windows 上可能没有 bin 子目录）
-            if os.path.isdir(npm_global_root):
-                current_path = os.environ.get("PATH", "")
-                if npm_global_root not in current_path:
-                    os.environ["PATH"] = npm_global_root + os.pathsep + current_path
+                _prepend_to_path(bin_path)
     except Exception:
         pass
 
@@ -195,7 +211,7 @@ def check_iflow_installed() -> bool:
             "text": True,
             "timeout": 10,
         }
-        result = subprocess.run(["iflow", "--version"], **kwargs)
+        result = run_command(["iflow", "--version"], **kwargs)
         if result.returncode == 0:
             return True
     except FileNotFoundError:
@@ -231,7 +247,7 @@ def check_iflow_logged_in() -> bool:
             "text": True,
             "timeout": 10,
         }
-        result = subprocess.run(["iflow", "-p", "test"], **kwargs)
+        result = run_command(["iflow", "-p", "test"], **kwargs)
         # 如果返回 "Please login first" 或类似提示，说明未登录
         output = result.stdout + result.stderr
         if "login" in output.lower() or "please login" in output.lower():
@@ -272,7 +288,7 @@ def ensure_iflow_ready() -> bool:
 
     console.print("[cyan]自动安装依赖中...[/cyan]")
     try:
-        result = subprocess.run(install_cmd)
+        result = run_command(install_cmd)
     except FileNotFoundError:
         result = None
 
@@ -775,25 +791,15 @@ async def _start_acp_server(port: int = 8090) -> Optional[asyncio.subprocess.Pro
         return None
     
     try:
-        if is_windows():
-            # Windows 上使用 shell 启动 iflow 命令，确保 .CMD 文件能被正确执行
-            cmd = f'iflow --experimental-acp --stream --port {port}'
-            process = await asyncio.create_subprocess_shell(
-                cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        else:
-            # Unix 系统使用 exec 方式
-            process = await asyncio.create_subprocess_exec(
-                "iflow",
-                "--experimental-acp",
-                "--stream",
-                "--port", str(port),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                start_new_session=True,
-            )
+        prepared = prepare_subprocess_command(
+            ["iflow", "--experimental-acp", "--stream", "--port", str(port)]
+        )
+        process = await asyncio.create_subprocess_exec(
+            *prepared,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=not is_windows(),
+        )
         
         # 等待服务启动
         await asyncio.sleep(2)
@@ -1306,12 +1312,7 @@ app.command(name="config")(config_cmd)
 def _run_iflow_cmd(cmd: list[str], cwd: Optional[Path] = None) -> int:
     """执行 iflow 命令（跨平台）。"""
     kwargs = {"cwd": str(cwd) if cwd else None}
-    if is_windows():
-        kwargs["shell"] = True
-        cmd_str = " ".join(f'"{c}"' if " " in c else c for c in cmd)
-        result = subprocess.run(cmd_str, **kwargs)
-    else:
-        result = subprocess.run(cmd, **kwargs)
+    result = run_command(cmd, **kwargs)
     return result.returncode
 
 
