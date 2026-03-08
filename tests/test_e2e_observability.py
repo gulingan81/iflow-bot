@@ -55,6 +55,8 @@ async def test_observability_new_chat_log_emitted():
         logger.remove(handler_id)
 
     assert any("New chat requested:" in rec for rec in records)
+    # 至少要有结构化模板（当前实现使用 loguru + %s 模板占位）
+    assert any("channel=%s" in rec and "chat_id=%s" in rec and "mode=%s" in rec and "cleared=%s" in rec for rec in records)
 
 
 @pytest.mark.asyncio

@@ -23,13 +23,20 @@ class _TrackingAdapter:
         self.session_mappings = _FakeSessionMappings()
         self.active_per_key: dict[str, int] = {}
         self.max_active_per_key: dict[str, int] = {}
+        self.global_active = 0
+        self.global_max_active = 0
 
     async def chat(self, message: str, channel: str, chat_id: str, model: str):
         key = f"{channel}:{chat_id}"
         cur = self.active_per_key.get(key, 0) + 1
         self.active_per_key[key] = cur
         self.max_active_per_key[key] = max(cur, self.max_active_per_key.get(key, 0))
+
+        self.global_active += 1
+        self.global_max_active = max(self.global_max_active, self.global_active)
         await asyncio.sleep(0.03)
+        self.global_active -= 1
+
         self.active_per_key[key] -= 1
         return f"ok:{key}"
 
@@ -61,6 +68,23 @@ async def test_loop_same_user_is_serialized():
     await asyncio.gather(loop._process_message(m1), loop._process_message(m2))
 
     assert adapter.max_active_per_key.get('feishu:same', 0) == 1
+
+
+@pytest.mark.asyncio
+async def test_loop_different_users_can_run_in_parallel():
+    bus = MessageBus()
+    adapter = _TrackingAdapter()
+    loop = AgentLoop(bus=bus, adapter=adapter, model='kimi-k2.5', streaming=False)
+
+    m1 = InboundMessage(channel='feishu', sender_id='u1', chat_id='c1', content='a', metadata={'message_id': '1'})
+    m2 = InboundMessage(channel='feishu', sender_id='u2', chat_id='c2', content='b', metadata={'message_id': '2'})
+
+    await asyncio.gather(loop._process_message(m1), loop._process_message(m2))
+
+    assert adapter.max_active_per_key.get('feishu:c1', 0) == 1
+    assert adapter.max_active_per_key.get('feishu:c2', 0) == 1
+    # 不同用户（不同 key）不应被同一把锁串行化
+    assert adapter.global_max_active >= 2
 
 
 @pytest.mark.asyncio

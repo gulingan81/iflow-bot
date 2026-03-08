@@ -128,6 +128,11 @@ async def test_e2e_streaming_flow_emits_progress_and_end(monkeypatch):
     assert any(o.metadata.get("_streaming") for o in outs), "should emit streaming progress/final"
     assert any(o.metadata.get("_streaming_end") for o in outs), "should emit streaming end marker"
 
+    # 进度/结束消息应携带一致的 reply_to_id，便于全链路追踪
+    tracked = [o for o in outs if o.metadata.get("_streaming") or o.metadata.get("_streaming_end")]
+    assert tracked
+    assert all(o.metadata.get("reply_to_id") == "m3" for o in tracked)
+
 
 @pytest.mark.asyncio
 async def test_e2e_streaming_empty_response_fallback():

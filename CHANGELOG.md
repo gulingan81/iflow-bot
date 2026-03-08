@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 - test(recovery): Add end-to-end recovery-path coverage for active compression rotation, stream empty-response compact retry, and non-stream context-overflow compact retry.
 - test(resilience): Add end-to-end resilience coverage for outbound-queue overflow behavior, per-user loop serialization, and Feishu streaming failure-path log classification.
+- test(concurrency-observability): Add chain-level assertions for cross-user parallel handling and streaming trace metadata consistency (`reply_to_id` on progress/end path).
 
 ## v0.3.5 - 2026-03-09
 
